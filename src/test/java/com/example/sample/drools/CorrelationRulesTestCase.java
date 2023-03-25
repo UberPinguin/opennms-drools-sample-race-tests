@@ -32,38 +32,42 @@ import static org.junit.Assert.assertEquals;
 import static org.opennms.core.utils.InetAddressUtils.addr;
 
 import org.junit.runner.RunWith;
-import org.opennms.netmgt.EventConstants;
-import org.springframework.test.context.junit4.SpringJUnit4ClassRunner;
+import org.opennms.core.test.OpenNMSJUnit4ClassRunner;
+import org.opennms.netmgt.correlation.CorrelationEngine;
+import org.opennms.netmgt.events.api.EventConstants;
 
 import org.opennms.netmgt.correlation.CorrelationEngineRegistrar;
 import org.opennms.netmgt.correlation.drools.DroolsCorrelationEngine;
 import org.opennms.test.JUnitConfigurationEnvironment;
-import org.opennms.netmgt.eventd.mock.EventAnticipator;
-import org.opennms.netmgt.eventd.mock.MockEventIpcManager;
+import org.opennms.netmgt.dao.mock.EventAnticipator;
+import org.opennms.netmgt.dao.mock.MockEventIpcManager;
 import org.opennms.netmgt.model.events.EventBuilder;
 import org.opennms.netmgt.xml.event.Event;
 import org.opennms.core.test.ConfigurationTestUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.test.context.ContextConfiguration;
 
 /**
  * The Class CorrelationRulesTestCase.
- * 
+ *
  * @author <a href="mailto:jeffg@opennms.org">Jeff Gehlbach</a>
  */
-@RunWith(SpringJUnit4ClassRunner.class)
-@ContextConfiguration(locations={
-        "classpath:META-INF/opennms/applicationContext-daemon.xml",
-        "classpath:META-INF/opennms/applicationContext-soa.xml",
-        "classpath:META-INF/opennms/mockEventIpcManager.xml",
-        "classpath:META-INF/opennms/correlation-engine.xml",
-        "classpath:test-context.xml"
-})
+@RunWith(OpenNMSJUnit4ClassRunner.class)
+@ContextConfiguration(
+    locations = {
+      //"classpath:META-INF/opennms/applicationContext-daemon.xml",
+      "classpath:META-INF/opennms/applicationContext-soa.xml",
+      "classpath:META-INF/opennms/mockEventIpcManager.xml",
+      "classpath:META-INF/opennms/correlation-engine.xml",
+      "classpath:test-context.xml"
+    })
 @JUnitConfigurationEnvironment
 public abstract class CorrelationRulesTestCase {
 
     /** The event IPC manager. */
     @Autowired
+    @Qualifier("eventIpcManager")
     private MockEventIpcManager m_eventIpcMgr;
 
     /** The anticipated memory size. */
@@ -71,6 +75,7 @@ public abstract class CorrelationRulesTestCase {
 
     /** The correlator. */
     @Autowired
+    @Qualifier("correlator")
     private CorrelationEngineRegistrar m_correlator;
 
     /**
@@ -97,7 +102,9 @@ public abstract class CorrelationRulesTestCase {
     protected void verify(DroolsCorrelationEngine engine) {
         getAnticipator().verifyAnticipated(0, 0, 0, 0, 0);
         if (m_anticipatedMemorySize != null) {
-            assertEquals("Unexpected number of objects in working memory: "+engine.getMemoryObjects(), m_anticipatedMemorySize.intValue(), engine.getMemorySize());
+            engine.getKieSessionObjects();
+            assertEquals("Unexpected number of objects in working memory: "+engine.getKieSessionObjects(),
+                m_anticipatedMemorySize.intValue(), engine.getKieSessionObjects().size());
         }
     }
 
@@ -107,9 +114,21 @@ public abstract class CorrelationRulesTestCase {
      * @param engineName the engine name
      * @return the drools correlation engine
      */
-    protected DroolsCorrelationEngine findEngineByName(String engineName) {
-        return (DroolsCorrelationEngine) m_correlator.findEngineByName(engineName);
+  protected DroolsCorrelationEngine findEngineByName(String engineName) {
+    final DroolsCorrelationEngine droolsEngine = (DroolsCorrelationEngine) m_correlator.findEngineByName(engineName);
+    if (droolsEngine == null) {
+      StringBuilder sb = new StringBuilder();
+      for (CorrelationEngine engine : m_correlator.getEngines()) {
+        if (sb.length() > 0) {
+          sb.append(",");
+        }
+        sb.append(engine.getName());
+      }
+      throw new IllegalArgumentException(String.format("No engine by name '%s' found. Available engines are: ",
+          engineName, sb.toString()));
     }
+    return droolsEngine;
+  }
 
     /**
      * Anticipate.
@@ -118,32 +137,6 @@ public abstract class CorrelationRulesTestCase {
      */
     protected void anticipate(Event event) {
         getAnticipator().anticipateEvent(event);
-    }
-
-    /**
-     * Creates the remote node lost service event.
-     *
-     * @param nodeId the node id
-     * @param ipAddr the ip addr
-     * @param svcName the svc name
-     * @param locationMonitor the location monitor
-     * @return the event
-     */
-    protected Event createRemoteNodeLostServiceEvent(int nodeId, String ipAddr, String svcName, int locationMonitor) {
-        return createEvent(EventConstants.REMOTE_NODE_LOST_SERVICE_UEI, nodeId, ipAddr, svcName, locationMonitor);
-    }
-
-    /**
-     * Creates the remote node regained service event.
-     *
-     * @param nodeId the node id
-     * @param ipAddr the ip addr
-     * @param svcName the svc name
-     * @param locationMonitor the location monitor
-     * @return the event
-     */
-    protected Event createRemoteNodeRegainedServiceEvent(int nodeId, String ipAddr, String svcName, int locationMonitor) {
-        return createEvent(EventConstants.REMOTE_NODE_REGAINED_SERVICE_UEI, nodeId, ipAddr, svcName, locationMonitor);
     }
 
     /**

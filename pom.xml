@@ -37,7 +37,24 @@
   <version>1.0-SNAPSHOT</version>
   <name>Test Suite For The OpenNMS Drools Correlation Engine</name>
   <url>http://maven.apache.org</url>
+
+  <properties>
+    <opennms.version>31.0.5</opennms.version>
+    <maven.surefire.plugin.version>3.0.0-M5</maven.surefire.plugin.version>
+    <maven.compiler.source>8</maven.compiler.source>
+    <maven.compiler.target>8</maven.compiler.target>
+  </properties>
+
   <build>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-surefire-plugin</artifactId>
+          <version>${maven.surefire.plugin.version}</version>
+        </plugin>
+      </plugins>  
+    </pluginManagement>
     <plugins>
       <plugin>
         <artifactId>maven-surefire-plugin</artifactId>
@@ -52,76 +69,61 @@
     </plugins>
   </build>
 
-  <properties>
-    <opennms.version>31.0.5-1</opennms.version>
-  </properties>
-
   <dependencies>
+    <dependency>
+      <groupId>org.apache.maven.plugins</groupId>
+      <artifactId>maven-surefire-plugin</artifactId>
+      <version>${maven.surefire.plugin.version}</version>
+      <scope>test</scope>
+    </dependency>
     <dependency>
       <groupId>org.opennms</groupId>
       <artifactId>drools-correlation-engine</artifactId>
       <version>${opennms.version}</version>
     </dependency>
-    
     <dependency>
       <groupId>org.opennms</groupId>
-      <artifactId>opennms-dao</artifactId>
+      <artifactId>opennms-dao-api</artifactId>
       <version>${opennms.version}</version>
-      <type>test-jar</type>
+      <type>jar</type>
       <scope>test</scope>
     </dependency>
-
     <dependency>
       <groupId>org.opennms.core</groupId>
       <artifactId>org.opennms.core.soa</artifactId>
       <version>${opennms.version}</version>
       <scope>test</scope>
     </dependency>
-
     <dependency>
       <groupId>org.opennms.core.test-api</groupId>
       <artifactId>org.opennms.core.test-api.services</artifactId>
       <version>${opennms.version}</version>
       <scope>test</scope>
     </dependency>
-
     <dependency>
       <groupId>org.opennms.core.test-api</groupId>
       <artifactId>org.opennms.core.test-api.http</artifactId>
       <version>${opennms.version}</version>
       <scope>test</scope>
     </dependency>
-    
     <dependency>
       <groupId>org.opennms.tests</groupId>
       <artifactId>org.opennms.tests.mock-elements</artifactId>
       <version>${opennms.version}</version>
       <scope>test</scope>
     </dependency>
-    
     <dependency>
       <groupId>org.opennms</groupId>
-      <artifactId>opennms-test</artifactId>
+      <artifactId>opennms-dao-mock</artifactId>
       <version>${opennms.version}</version>
       <scope>test</scope>
     </dependency>
-    
-    
     <dependency>
       <groupId>junit</groupId>
       <artifactId>junit</artifactId>
-      <version>4.8.2</version>
+      <version>4.13.2</version>
       <scope>test</scope>
     </dependency>
-
   </dependencies>
-  <repositories>
-    <repository>
-      <snapshots><enabled>false</enabled></snapshots>
-      <releases><enabled>true</enabled></releases>
-      <id>opennms-repo</id>
-      <name>OpenNMS Repository</name>
-      <url>http://maven.opennms.org/content/groups/opennms.org-release</url>
-    </repository>
-  </repositories>
+
 </project>

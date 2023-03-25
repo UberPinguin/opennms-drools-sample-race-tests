@@ -32,7 +32,7 @@ import static org.opennms.core.utils.InetAddressUtils.addr;
 
 import org.junit.Ignore;
 import org.junit.Test;
-import org.opennms.netmgt.EventConstants;
+import org.opennms.netmgt.events.api.EventConstants;
 import org.opennms.netmgt.correlation.drools.DroolsCorrelationEngine;
 import org.opennms.netmgt.model.events.EventBuilder;
 import org.opennms.netmgt.xml.event.Event;

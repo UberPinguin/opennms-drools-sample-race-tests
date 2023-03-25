@@ -1,0 +1,101 @@
+package org.opennms.netmgt.correlation.drools;
+
+import java.util.Date;
+
+import org.opennms.core.utils.InetAddressUtils;
+import org.opennms.netmgt.correlation.drools.DroolsCorrelationEngine;
+import org.opennms.netmgt.xml.event.Event;
+import org.opennms.netmgt.model.events.EventBuilder;
+import org.opennms.netmgt.events.api.EventConstants;
+
+global org.opennms.netmgt.correlation.drools.DroolsCorrelationEngine engine;
+global org.opennms.netmgt.correlation.drools.NodeService nodeService;
+global java.lang.Integer CACHE_BW_HIGH_TRIGGER_COUNT;
+global java.lang.Integer CACHE_BW_HIGH_TIME_WINDOW;
+
+
+/*
+ * 5) (Aggregation) If you receive >10 times avgcacheBWusageHigh
+ * Then generate one single critical alarm to be forwarded via SNMP to VizGems
+ * and email to nmsadmin@att.com.
+ */
+
+declare HighAvgCacheBwUtilSituation
+	node : Long
+	timerId : Integer
+	occurrences : Integer
+end
+
+rule "initial avgcacheBWusageHigh event received for node"
+	salience 100
+	when
+		$e : Event( $uei : uei == "uei.opennms.org/vendor/Juniper/MFC/traps/avgcacheBWusageHigh", $nodeid : nodeid, $ipaddr : interface )
+		not( HighAvgCacheBwUtilSituation( node == $nodeid ) )
+	then
+		retract( $e );
+		HighAvgCacheBwUtilSituation situation = new HighAvgCacheBwUtilSituation();
+		situation.setNode( $nodeid );
+		situation.setTimerId( engine.setTimer( CACHE_BW_HIGH_TIME_WINDOW ) );
+		situation.setOccurrences( 1 );
+		insert( situation );
+		println( "Found avgcacheBWusageHigh event for node " + $nodeid +". Inserted new situation " + 
+		situation + " and retracted event." );
+end
+
+rule "subsequent but NON-triggering avgcacheBWusageHigh event received for node"
+	salience 100
+	when
+		$e : Event( $uei : uei == "uei.opennms.org/vendor/Juniper/MFC/traps/avgcacheBWusageHigh", $nodeid : nodeid, $ipaddr : interface )
+		$situation : HighAvgCacheBwUtilSituation( occurrences < ( CACHE_BW_HIGH_TRIGGER_COUNT ), node == $nodeid )
+	then
+		println( "Found avgcacheBWusageHigh event for active situation " + $situation + ". Retracting event. Incrementing occurrences on situation." );
+		retract( $e );
+		incrementOccurrences( $situation );
+		update( $situation );
+end
+
+rule "subsequent TRIGGERING avgcacheBWusageHigh event received for node"
+	salience 1000
+	when
+		$e : Event( $uei : uei == "uei.opennms.org/vendor/Juniper/MFC/traps/avgcacheBWusageHigh", $nodeid : nodeid, $ipaddr : interface )
+		$situation : HighAvgCacheBwUtilSituation( $occ : occurrences >= ( CACHE_BW_HIGH_TRIGGER_COUNT ), node == $nodeid )
+	then
+		println( "Final avgcacheBWusageHigh event on situation " + $situation + " triggered critical event, retracting event and situation; sending escalation event" );
+		retract( $e );
+		retract( $situation );
+		sendCriticalXactRateHighEvent( engine, $nodeid, $ipaddr, CACHE_BW_HIGH_TRIGGER_COUNT, CACHE_BW_HIGH_TIME_WINDOW );
+end
+
+rule "retract expired avgcacheBWusageHigh situations"
+	when
+		$situation : HighAvgCacheBwUtilSituation( $nodeid : node, $timerId : timerId, $occ : occurrences < ( CACHE_BW_HIGH_TRIGGER_COUNT ) )
+		$expiration : TimerExpired( id == $timerId )
+	then
+		println( "Found expired avgcacheBWusageHigh situation " + $situation + "; retracting situation and expiration." );
+		retract( $situation );
+		retract( $expiration );
+end
+
+
+function void incrementOccurrences( HighAvgCacheBwUtilSituation situation ) {
+	Integer occ = situation.getOccurrences();
+	occ++;
+	situation.setOccurrences( occ );
+}
+
+function void sendCriticalXactRateHighEvent( DroolsCorrelationEngine engine, Long nodeId, String ipAddr, Integer count, Integer timeWindow ) {
+		Integer timeWindowMinutes = timeWindow / 60000;
+        EventBuilder bldr = new EventBuilder("uei.opennms.org/vendor/Juniper/MFC/correlation/aggregateAvgcacheBWusageHigh", "Drools")
+                .setNodeid(nodeId.intValue())
+                .setInterface(InetAddressUtils.addr(ipAddr))
+		.addParam("correlationEngineName", "Drools")
+		.addParam("correlationRuleSetName", engine.getName())
+		.addParam("correlationComments", "Observed at least " + count + " occurrences within " + timeWindowMinutes + " minutes")
+		.addParam("occurrences", count.toString())
+		.addParam("timeWindow", timeWindowMinutes.toString());
+        engine.sendEvent(bldr.getEvent());
+}
+
+function void println(String msg) {
+	System.out.println(new Date() + " : " + msg);
+}

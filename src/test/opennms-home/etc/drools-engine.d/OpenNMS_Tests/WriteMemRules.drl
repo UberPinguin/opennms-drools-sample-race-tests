@@ -1,0 +1,104 @@
+package org.opennms.netmgt.correlation.drools;
+
+import java.util.Date;
+
+import org.opennms.core.utils.InetAddressUtils;
+import org.opennms.netmgt.correlation.drools.DroolsCorrelationEngine;
+import org.opennms.netmgt.xml.event.Event;
+import org.opennms.netmgt.xml.event.Logmsg;
+import org.opennms.netmgt.model.events.EventBuilder;
+import org.opennms.netmgt.events.api.EventConstants;
+
+global org.opennms.netmgt.correlation.drools.DroolsCorrelationEngine engine;
+global org.opennms.netmgt.correlation.drools.NodeService nodeService;
+global java.lang.Integer WRITE_MEM_TRIGGER_COUNT;
+global java.lang.Integer WRITE_MEM_TIME_WINDOW;
+
+
+/*
+ * 4) (Aggregation) If you receive >10 times a syslog event indicating
+ * that an operator has executed "wr mem" on an MFC
+ * Then generate one single warning alarm to be forwarded via SNMP to VizGems
+ * and email to nmsadmin@att.com.
+ */
+
+declare WriteMemSituation
+	node : Long
+	timerId : Integer
+	occurrences : Integer
+	logmsg : Logmsg
+end
+
+rule "initial local7/Notice wr-mem event received for node"
+	salience 100
+	when
+		$e : Event( $uei : uei == "uei.opennms.org/syslogd/local7/Notice", $nodeid : nodeid, $ipaddr : interface, logmsg.content matches "wr(...)? mem(...)?" )
+		not( WriteMemSituation( node == $nodeid ) )
+	then
+		retract( $e );
+		WriteMemSituation situation = new WriteMemSituation();
+		situation.setNode( $nodeid );
+		situation.setTimerId( engine.setTimer( WRITE_MEM_TIME_WINDOW ) );
+		situation.setOccurrences( 1 );
+		situation.setLogmsg($e.getLogmsg());
+		insert( situation );
+		println( "Found local7/Notice wr-mem event for node " + $nodeid +". Inserted new situation " + situation + " and retracted event." );
+end
+
+rule "subsequent but NON-triggering local7/Notice wr-mem event received for node"
+	salience 100
+	when
+		$e : Event( $uei : uei == "uei.opennms.org/syslogd/local7/Notice", $nodeid : nodeid, $ipaddr : interface, logmsg.content matches "wr(...)? mem(...)?" )
+		$situation : WriteMemSituation( occurrences < ( WRITE_MEM_TRIGGER_COUNT ), node == $nodeid )
+	then
+		println( "Found local7/Notice wr-mem event for active situation " + $situation + ". Retracting event. Incrementing occurrences on situation." );
+		retract( $e );
+		incrementOccurrences( $situation );
+		update( $situation );
+end
+
+rule "subsequent TRIGGERING local7/Notice wr-mem event received for node"
+	salience 1000
+	when
+		$e : Event( $uei : uei == "uei.opennms.org/syslogd/local7/Notice", $nodeid : nodeid, $ipaddr : interface, logmsg.content matches "wr(...)? mem(...)?" )
+		$situation : WriteMemSituation( $occ : occurrences >= ( WRITE_MEM_TRIGGER_COUNT ), node == $nodeid )
+	then
+		println( "Final local7/Notice wr-mem event on situation " + $situation + " triggered warning event, retracting event and situation; sending escalation event" );
+		retract( $e );
+		retract( $situation );
+		sendWarningWrMemEvent( engine, $nodeid, $ipaddr, WRITE_MEM_TRIGGER_COUNT, WRITE_MEM_TIME_WINDOW );
+end
+
+rule "retract expired local7/Notice wr-mem situations"
+	when
+		$situation : WriteMemSituation( $nodeid : node, $timerId : timerId, $occ : occurrences < ( WRITE_MEM_TRIGGER_COUNT ), logmsg.content matches "wr(...)? mem(...)?" )
+		$expiration : TimerExpired( id == $timerId )
+	then
+		println( "Found expired local7/Notice wr-mem situation " + $situation + "; retracting situation and expiration." );
+		retract( $situation );
+		retract( $expiration );
+end
+
+
+function void incrementOccurrences( WriteMemSituation situation ) {
+	Integer occ = situation.getOccurrences();
+	occ++;
+	situation.setOccurrences( occ );
+}
+
+function void sendWarningWrMemEvent( DroolsCorrelationEngine engine, Long nodeId, String ipAddr, Integer count, Integer timeWindow ) {
+		Integer timeWindowMinutes = timeWindow / 60000;
+        EventBuilder bldr = new EventBuilder("uei.opennms.org/vendor/Juniper/MFC/correlation/writeMemThresholdReached", "Drools")
+                .setNodeid(nodeId.intValue())
+                .setInterface(InetAddressUtils.addr(ipAddr))
+		.addParam("correlationEngineName", "Drools")
+		.addParam("correlationRuleSetName", engine.getName())
+		.addParam("correlationComments", "An operator has executed the 'write memory' command at least " + count + " times within " + timeWindowMinutes + " minutes")
+		.addParam("occurrences", count.toString())
+		.addParam("timeWindow", timeWindowMinutes.toString());
+        engine.sendEvent(bldr.getEvent());
+}
+
+function void println(String msg) {
+	System.out.println(new Date() + " : " + msg);
+}

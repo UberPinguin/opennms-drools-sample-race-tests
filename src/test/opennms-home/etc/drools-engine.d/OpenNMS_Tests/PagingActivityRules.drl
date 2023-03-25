@@ -1,0 +1,100 @@
+package org.opennms.netmgt.correlation.drools;
+
+import java.util.Date;
+
+import org.opennms.core.utils.InetAddressUtils;
+import org.opennms.netmgt.correlation.drools.DroolsCorrelationEngine;
+import org.opennms.netmgt.xml.event.Event;
+import org.opennms.netmgt.model.events.EventBuilder;
+import org.opennms.netmgt.events.api.EventConstants;
+
+global org.opennms.netmgt.correlation.drools.DroolsCorrelationEngine engine;
+global org.opennms.netmgt.correlation.drools.NodeService nodeService;
+global java.lang.Integer PAGING_HIGH_TRIGGER_COUNT;
+global java.lang.Integer PAGING_HIGH_TIME_WINDOW;
+
+
+/*
+ * 14) If you receive >10 times pagingActivityHigh
+ * Then generate one single medium alarm to be forwarded via SNMP to VizGems
+ * and email to nmsadmin@att.com.
+ */
+
+declare HighPagingSituation
+	node : Long
+	timerId : Integer
+	occurrences : Integer
+end
+
+rule "initial pagingActivityHigh event received for node"
+	salience 100
+	when
+		$e : Event( $uei : uei == "uei.opennms.org/vendor/TallMaple/TMS/traps/pagingActivityHigh", $nodeid : nodeid, $ipaddr : interface )
+		not( HighPagingSituation( node == $nodeid ) )
+	then
+		retract( $e );
+		HighPagingSituation situation = new HighPagingSituation();
+		situation.setNode( $nodeid );
+		situation.setTimerId( engine.setTimer( PAGING_HIGH_TIME_WINDOW ) );
+		situation.setOccurrences( 1 );
+		insert( situation );
+		println( "Found pagingActivityHigh event for node " + $nodeid +". Inserted new situation " + situation + " and retracted event." );
+end
+
+rule "subsequent but NON-triggering pagingActivityHigh event received for node"
+	salience 100
+	when
+		$e : Event( $uei : uei == "uei.opennms.org/vendor/TallMaple/TMS/traps/pagingActivityHigh", $nodeid : nodeid, $ipaddr : interface )
+		$situation : HighPagingSituation( occurrences < ( PAGING_HIGH_TRIGGER_COUNT ), node == $nodeid )
+	then
+		println( "Found pagingActivityHigh event for active situation " + $situation + ". Retracting event. Incrementing occurrences on situation." );
+		retract( $e );
+		incrementOccurrences( $situation );
+		update( $situation );
+end
+
+rule "subsequent TRIGGERING pagingActivityHigh event received for node"
+	salience 1000
+	when
+		$e : Event( $uei : uei == "uei.opennms.org/vendor/TallMaple/TMS/traps/pagingActivityHigh", $nodeid : nodeid, $ipaddr : interface )
+		$situation : HighPagingSituation( $occ : occurrences >= ( PAGING_HIGH_TRIGGER_COUNT ), node == $nodeid )
+	then
+		println( "Final pagingActivityHigh event on situation " + $situation + " triggered critical event, retracting event and situation; sending escalation event" );
+		retract( $e );
+		retract( $situation );
+		sendAggregatePagingHighEvent( engine, $nodeid, $ipaddr, PAGING_HIGH_TRIGGER_COUNT, PAGING_HIGH_TIME_WINDOW );
+end
+
+rule "retract expired pagingActivityHigh situations"
+	when
+		$situation : HighPagingSituation( $nodeid : node, $timerId : timerId, $occ : occurrences < ( PAGING_HIGH_TRIGGER_COUNT ) )
+		$expiration : TimerExpired( id == $timerId )
+	then
+		println( "Found expired pagingActivityHigh situation " + $situation + "; retracting situation and expiration." );
+		retract( $situation );
+		retract( $expiration );
+end
+
+
+function void incrementOccurrences( HighPagingSituation situation ) {
+	Integer occ = situation.getOccurrences();
+	occ++;
+	situation.setOccurrences( occ );
+}
+
+function void sendAggregatePagingHighEvent( DroolsCorrelationEngine engine, Long nodeId, String ipAddr, Integer count, Integer timeWindow ) {
+		Integer timeWindowMinutes = timeWindow / 60000;
+        EventBuilder bldr = new EventBuilder("uei.opennms.org/vendor/TallMaple/TMS/correlation/aggregatePagingActivityHigh", "Drools")
+                .setNodeid(nodeId.intValue())
+                .setInterface(InetAddressUtils.addr(ipAddr))
+		.addParam("correlationEngineName", "Drools")
+		.addParam("correlationRuleSetName", engine.getName())
+		.addParam("correlationComments", "Observed at least " + count + " occurrences within " + timeWindowMinutes + " minutes")
+		.addParam("occurrences", count.toString())
+		.addParam("timeWindow", timeWindowMinutes.toString());
+        engine.sendEvent(bldr.getEvent());
+}
+
+function void println(String msg) {
+	System.out.println(new Date() + " : " + msg);
+}
