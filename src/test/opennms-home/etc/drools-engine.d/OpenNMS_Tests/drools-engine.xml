@@ -63,7 +63,11 @@
     <global name="WRITE_MEM_TRIGGER_COUNT" type="java.lang.Integer" value="5"/>
     <global name="WRITE_MEM_TIME_WINDOW" type="java.lang.Integer" value="30000"/>
   </rule-set>
-
+  <rule-set name="deviceStateTrackingRaceConditionRules" event-processing-mode="stream">
+    <rule-file>file:src/test/opennms-home/etc/drools-engine.d/OpenNMS_Tests/CorrelationRaceConditionRules.drl</rule-file>
+    <event>DeviceOffline</event>
+    <event>DeviceAdopted</event>
+  </rule-set>
   <!-- Disabled as it's not used, but useful as a reference
   <rule-set name="resourcePoolUtilRules">
     <rule-file>file:src/test/opennms-home/etc/ResourcePoolUtilRules.drl</rule-file>
