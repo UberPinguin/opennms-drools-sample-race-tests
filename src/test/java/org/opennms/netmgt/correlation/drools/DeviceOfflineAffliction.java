@@ -9,6 +9,8 @@ public class DeviceOfflineAffliction extends DefaultFactHandle {
 
   String location;
   ConcurrentSkipListSet offlineDevices;
+  Integer count;
+  String searchKey;
 
   public String getLocation() {
     return location;
@@ -23,6 +25,24 @@ public class DeviceOfflineAffliction extends DefaultFactHandle {
     return offlineDevices;
   }
 
+  public Integer getCount() {
+    return count;
+  }
+
+  public DeviceOfflineAffliction setCount(Integer count) {
+    this.count = count;
+    return this;
+  }
+
+  public String getSearchKey() {
+    return searchKey;
+  }
+
+  public DeviceOfflineAffliction setSearchKey(String searchKey) {
+    this.searchKey = searchKey;
+    return this;
+  }
+
   public DeviceOfflineAffliction() {}
 
   public DeviceOfflineAffliction setOfflineDevices(ConcurrentSkipListSet offlineDevices) {
@@ -30,9 +50,12 @@ public class DeviceOfflineAffliction extends DefaultFactHandle {
     return this;
   }
 
-  public DeviceOfflineAffliction(String location, ConcurrentSkipListSet offlineDevices) {
+  public DeviceOfflineAffliction(String location, ConcurrentSkipListSet offlineDevices, Integer count,
+      String searchKey) {
     this.location = location;
     this.offlineDevices = offlineDevices;
+    this.count = count;
+    this.searchKey = searchKey;
   }
 
   @Override
