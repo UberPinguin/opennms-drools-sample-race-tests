@@ -1,28 +1,12 @@
 package org.opennms.netmgt.correlation.drools
 
-import java.net.InetAddress
-import java.text.SimpleDateFormat
-import java.util.ArrayList
-import java.util.concurrent.ConcurrentSkipListSet
-import java.util.List
-import java.util.Map
-import java.util.Date
-import java.util.regex.Matcher
-import java.util.regex.Pattern
 import org.opennms.netmgt.correlation.drools.DroolsCorrelationEngine
-import org.opennms.netmgt.model.OnmsSeverity
 import org.opennms.netmgt.xml.event.AlarmData
 import org.opennms.netmgt.xml.event.Event
 import org.opennms.netmgt.xml.event.Parm
-import org.opennms.netmgt.xml.event.Snmp
 import org.opennms.netmgt.xml.event.Value
 import org.slf4j.Logger
-import java.util.Arrays
-import org.opennms.core.criteria.CriteriaBuilder
 import org.opennms.netmgt.model.OnmsAlarm
-import java.util.Objects
-import org.apache.commons.lang3.StringUtils
-import org.opennms.netmgt.model.TroubleTicketState
 
 global DroolsCorrelationEngine engine
 
@@ -34,61 +18,55 @@ end
 
 declare DeviceOfflineAffliction
   location : String
-  offlineDevices : ConcurrentSkipListSet
-  count : Integer
-  searchKey : String
 end
 
-rule "snmp_enrich:trapDeviceAdopted: Update matching affliction by location"
-  salience 40
+rule "DeviceAdopted: Delete Correlated DeviceOffline Event"
+  salience 30
   no-loop true
   when
-    $e : Event(uei == "uei.opennms.org/tests/trapDeviceAdopted", dbid == 0, alarmData != null,
+    $ae : Event(uei == "uei.opennms.org/tests/trapDeviceAdopted", dbid == 0, alarmData != null,
         $severity : severity, $uei : uei)
-    Parm(parmName == "opennms_traceId", value.content != "", $uuid : value.content) from $e.parmCollection
-    Parm(parmName == "location", value.content != "", $location : value.content) from $e.parmCollection
-    Parm(parmName == "reductionKey", value.content != "", $reductionKey : value.content) from $e.parmCollection
-    Parm(parmName == "clearKey", value.content != "", $clearKey : value.content) from $e.parmCollection
-    Parm(parmName == "deviceName", value.content != "", $deviceName : value.content) from $e.parmCollection
-    $aff : DeviceOfflineAffliction(location == $location, $searchKey : searchKey)
+    Parm(parmName == "opennms_traceId", value.content != "", $uuid : value.content) from $ae.parmCollection
+    Parm(parmName == "location", value.content != "", $location : value.content) from $ae.parmCollection
+    Parm(parmName == "deviceName", value.content != "", $deviceName : value.content) from $ae.parmCollection
+    $oe : Event(uei == "uei.opennms.org/tests/trapDeviceOffline", this before $ae)
+    Parm(parmName == "location", value.content != "", $location == value.content) from $oe.parmCollection
+    Parm(parmName == "deviceName", value.content != "", $deviceName == value.content) from $oe.parmCollection
   then
-    delete($e);
-    modify($aff) {
-      getOfflineDevices().remove($deviceName),
-      setCount($aff.getOfflineDevices().size())  
-    }
+    delete($oe);
   end
 
-rule "snmp_correlate:trapDeviceAdopted: All Devices Adopted For Location"
-  salience 40
+rule "DeviceAdopted: Affliction Retracted"
+  salience 20
   no-loop true
   when
-    $aff : DeviceOfflineAffliction(offlineDevices.size() == 0, $searchKey : searchKey)
+    $ae : Event(uei == "uei.opennms.org/tests/trapDeviceAdopted", dbid == 0, alarmData != null,
+        $severity : severity, $uei : uei)
+    Parm(parmName == "location", value.content != "", $location : value.content) from $ae.parmCollection
+    not(DeviceOfflineAffliction($location == location))
   then
-    delete($aff);
+    delete($ae);
   end
-
-rule "snmp_enrich:trapDeviceOffline: Correlate to existing affliction"
-  salience 40
+  
+rule "DeviceAdopted: No Matching DeviceOffline Events"
+  salience 10
   no-loop true
   when
-    $e : Event(uei == "uei.opennms.org/tests/trapDeviceOffline", dbid == 0, $severity : severity, $uei : uei)
-    Parm(parmName == "opennms_traceId", value.content != "", $uuid : value.content) from $e.parmCollection
-    Parm(parmName == "location", value.content != "", $location : value.content) from $e.parmCollection
-    Parm(parmName == "deviceName", value.content != "", $deviceName : value.content) from $e.parmCollection
-    not Parm(parmName == "parseHwAddrFailed", value.content == "true") from $e.parmCollection
-    not Parm(parmName == "createdOfflineAffliction", value.content == "true") from $e.parmCollection
-    $aff : DeviceOfflineAffliction(location == $location, $count : count)
+    $ae : Event(uei == "uei.opennms.org/tests/trapDeviceAdopted", dbid == 0, alarmData != null,
+        $severity : severity, $uei : uei)
+    Parm(parmName == "location", value.content != "", $location : value.content) from $ae.parmCollection
+    Parm(parmName == "deviceName", value.content != "", $deviceName : value.content) from $ae.parmCollection
+    not (
+      $oe : Event(uei == "uei.opennms.org/tests/trapDeviceOffline", this before $ae)
+      and Parm(parmName == "location", value.content != "", $location == value.content) from $oe.parmCollection
+      and Parm(parmName == "deviceName", value.content != "", $deviceName == value.content) from $oe.parmCollection
+    )
   then
-    delete($e);
-    modify($aff) {
-      getOfflineDevices().add($deviceName),
-      setCount($aff.getOfflineDevices().size())
-    };
+    delete($ae);
   end
 
-rule "snmp_enrich:trapDeviceOffline: Create new affliction"
-  salience 40
+rule "DeviceOffline: Create new affliction"
+  salience 0
   no-loop true
   when
     $e : Event(uei == "uei.opennms.org/tests/trapDeviceOffline", dbid == 0, $severity : severity, $uei : uei)
@@ -97,19 +75,6 @@ rule "snmp_enrich:trapDeviceOffline: Create new affliction"
     Parm(parmName == "deviceName", value.content != "", $deviceName : value.content) from $e.parmCollection
     Parm(parmName == "reductionKey", value.content != "", $reductionKey : value.content) from $e.parmCollection
     not Parm(parmName == "parseHwAddrFailed", value.content == "true") from $e.parmCollection
-    not Parm(parmName == "createdOfflineAffliction", value.content == "true") from $e.parmCollection
-    not $aff : DeviceOfflineAffliction(location == $location)
   then
-    delete($e);
-    ConcurrentSkipListSet<String> offlineDevices = new ConcurrentSkipListSet<>();
-    offlineDevices.add($deviceName);
-    DeviceOfflineAffliction aff = new DeviceOfflineAffliction();
-    aff.setLocation($location);
-    aff.setCount(1);
-    aff.setOfflineDevices(offlineDevices);
-    aff.setSearchKey(((String)$reductionKey).replace($e.getSeverity(),"%"));
-    insert(aff);
-    modify($e) {
-        addParm(new Parm("createdOfflineAffliction", "true"))
-    }
+    insertLogical(new DeviceOfflineAffliction($location));
   end

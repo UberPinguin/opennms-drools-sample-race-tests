@@ -1,12 +1,11 @@
 package com.example.sample.drools;
 
+import static org.junit.Assert.assertNotNull;
 import static org.springframework.test.util.AssertionErrors.assertEquals;
-import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Date;
 import java.util.UUID;
-import java.util.stream.Collectors;
 import org.apache.commons.lang3.StringUtils;
-import org.drools.core.common.DefaultFactHandle;
 import org.drools.core.common.InternalFactHandle;
 import org.drools.core.event.DebugAgendaEventListener;
 import org.drools.core.event.DebugRuleRuntimeEventListener;
@@ -14,8 +13,9 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.kie.api.KieServices;
+import org.kie.api.definition.KiePackage;
 import org.kie.api.logger.KieRuntimeLogger;
-import org.kie.api.runtime.KieSession;
+import org.kie.api.runtime.ObjectFilter;
 import org.opennms.netmgt.config.EventTranslatorConfigFactory;
 import org.opennms.netmgt.correlation.drools.DroolsCorrelationEngine;
 import org.opennms.netmgt.correlation.drools.DeviceOfflineAffliction;
@@ -51,15 +51,17 @@ public class DeviceStateCorrelationRaceConditionTest extends CorrelationRulesTes
 
   @Test
   public void testSingleOfflineEvent() throws InterruptedException {
-    m_anticipatedMemorySize = 1;
+    m_anticipatedMemorySize = 2;
     correlateOfflineEvents(1, 0, false);
     // if we don't sleep here, Drools won't create the affliction in time for
     // the following assertions.
     Thread.sleep(500);
     verify(m_engine);
+    assertEquals("Wrong number of Event facts", 1, countFactHandleByClass(Event.class::isInstance));
+    assertEquals("Wrong number of DeviceOfflineAffliction facts", 1,
+        countFactHandleByClass(DeviceOfflineAffliction.class::isInstance));
     DeviceOfflineAffliction aff = getDeviceOfflineAffliction();
-    ArrayList<String> offlineDevices = new ArrayList<>(aff.getOfflineDevices());
-    assertEquals("Wrong offline device remains in tracker", "device01", offlineDevices.get(0));
+    assertNotNull(aff);
   }
 
   /**
@@ -72,7 +74,7 @@ public class DeviceStateCorrelationRaceConditionTest extends CorrelationRulesTes
    *
    * At the end of the test, only device number 8 should remain in the
    * DeviceOfflineAffliction's offlineDevices list.
-   * 
+   *
    * @throws InterruptedException
    */
   @Test
@@ -85,10 +87,16 @@ public class DeviceStateCorrelationRaceConditionTest extends CorrelationRulesTes
     // if we don't sleep here, Drools won't have correlated all of the events in time for
     // the following assertions.
     Thread.sleep(500);
+    listRulesInSession();
+    printFactHandleDetails();
+    assertEquals("Wrong number of Event facts", 1, countFactHandleByClass(Event.class::isInstance));
+    assertEquals("Wrong number of DeviceOfflineAffliction facts", 1,
+        countFactHandleByClass(DeviceOfflineAffliction.class::isInstance));
     DeviceOfflineAffliction aff = getDeviceOfflineAffliction();
-    ArrayList<String> offlineDevices = new ArrayList<>(aff.getOfflineDevices());
-    assertEquals("Incorrect number of remaining offline devices", 1, offlineDevices.size());
-    assertEquals("Wrong offline device remains in tracker", "device08", offlineDevices.get(0));
+    assertNotNull(aff);
+    Event validateEvent = (Event) m_engine.getKieSession().getObjects(Event.class::isInstance).iterator().next();
+    assertEquals("Offline event for wrong device left in working memory","device08",
+        validateEvent.getParm("deviceName").getValue().getContent());
   }
 
   /**
@@ -114,20 +122,16 @@ public class DeviceStateCorrelationRaceConditionTest extends CorrelationRulesTes
     // if we don't sleep here, Drools won't have correlated all of the events in time for
     // the following assertions.
     Thread.sleep(500);
+    listRulesInSession();
+    printFactHandleDetails();
+    assertEquals("Wrong number of Event facts", 1, countFactHandleByClass(Event.class::isInstance));
+    assertEquals("Wrong number of DeviceOfflineAffliction facts", 1,
+            countFactHandleByClass(DeviceOfflineAffliction.class::isInstance));
     DeviceOfflineAffliction aff = getDeviceOfflineAffliction();
-    ArrayList<String> offlineDevices = new ArrayList<>(aff.getOfflineDevices());
-    assertEquals("Incorrect number of remaining offline devices", 1, offlineDevices.size());
-    assertEquals("Wrong offline device remains in tracker", "device08", offlineDevices.get(0));
-  }
-
-  private DeviceOfflineAffliction getDeviceOfflineAffliction() {
-    KieSession kieSession = m_engine.getKieSession();
-    return kieSession.getFactHandles().stream()
-        .filter(fh -> fh.getClass().getSimpleName().equals(DefaultFactHandle.class.getSimpleName()))
-        .map(InternalFactHandle.class::cast)
-        .map(InternalFactHandle::getObject)
-        .map(DeviceOfflineAffliction.class::cast)
-        .collect(Collectors.toList()).get(0);
+    assertNotNull(aff);
+    Event validateEvent = (Event) m_engine.getKieSession().getObjects(Event.class::isInstance).iterator().next();
+    assertEquals("Offline event for wrong device left in working memory","device08",
+        validateEvent.getParm("deviceName").getValue().getContent());
   }
 
   private void correlateOfflineEvents(int count, int skip, boolean threadSleep) throws InterruptedException {
@@ -189,5 +193,29 @@ public class DeviceStateCorrelationRaceConditionTest extends CorrelationRulesTes
         Thread.sleep(500);
       }
     }
+  }
+
+  private void listRulesInSession() {
+    Collection<KiePackage> packages = m_engine.getKieSession().getKieBase().getKiePackages();
+    System.err.println("printing inventory of rules");
+    packages.forEach(p -> p.getRules().forEach(r -> System.err.println("\t" + r.getName())));
+    System.err.println("end of rules inventory");
+  }
+
+  private void printFactHandleDetails() {
+    System.err.println("printing details of facts");
+    m_engine.getKieSession().getFactHandles().forEach(fh -> {
+      InternalFactHandle ifh = (InternalFactHandle) fh;
+      System.err.println("\t" + ifh.getObject().toString());
+    });
+    System.err.println("end of fact class name inventory");
+  }
+
+  private int countFactHandleByClass(ObjectFilter objFilter) {
+    return m_engine.getKieSession().getObjects(objFilter).size();
+  }
+
+  private DeviceOfflineAffliction getDeviceOfflineAffliction() {
+    return (DeviceOfflineAffliction) m_engine.getKieSession().getObjects(DeviceOfflineAffliction.class::isInstance).iterator().next();
   }
 }
